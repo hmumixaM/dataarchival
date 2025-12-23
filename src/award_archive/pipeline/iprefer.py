@@ -154,7 +154,7 @@ def ingest_iprefer_availability(
                 s3_path=s3_path,
                 mode="merge",
                 merge_keys=["nid", "date", "is_points"],
-                partition_by=["is_points"],
+                partition_by=["nid", "date"],
             )
             total_availability += len(batch_availability)
             rows_written += stats.get("rows_written", len(df))
