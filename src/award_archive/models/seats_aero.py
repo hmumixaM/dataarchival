@@ -279,3 +279,4 @@ class TripDetails(BaseModel):
 
     ID: str
     model_config = ConfigDict(extra="allow")
+

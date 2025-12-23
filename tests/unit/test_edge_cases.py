@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from award_archive.api.client import SeatsAeroClient
+from award_archive.api.seats_aero import SeatsAeroClient
 from award_archive.storage.hashing import add_metadata_columns, compute_row_hash
 
 
@@ -78,8 +78,8 @@ class TestAPIClientEdgeCases:
         client = SeatsAeroClient(api_key="  test_key  ")
         assert client.api_key == "  test_key  "  # Client doesn't trim
 
-    @patch("award_archive.api.client.httpx.request")
-    @patch("award_archive.api.client.time.sleep")
+    @patch("award_archive.api.seats_aero.httpx.request")
+    @patch("award_archive.api.seats_aero.time.sleep")
     def test_search_with_date_objects(self, mock_sleep, mock_request):
         """Should properly serialize date objects."""
         mock_response = MagicMock()
@@ -104,8 +104,8 @@ class TestAPIClientEdgeCases:
         assert params["start_date"] == "2025-03-15"
         assert params["end_date"] == "2025-03-20"
 
-    @patch("award_archive.api.client.httpx.request")
-    @patch("award_archive.api.client.time.sleep")
+    @patch("award_archive.api.seats_aero.httpx.request")
+    @patch("award_archive.api.seats_aero.time.sleep")
     def test_bulk_availability_with_all_optional_params(self, mock_sleep, mock_request):
         """Should handle all optional parameters."""
         mock_response = MagicMock()

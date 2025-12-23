@@ -1,6 +1,7 @@
 """Delta Lake storage operations."""
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -13,6 +14,10 @@ from award_archive.storage.credentials import get_storage_options
 from award_archive.storage.hashing import add_metadata_columns
 
 log = logging.getLogger(__name__)
+
+# Retry settings for concurrent write conflicts
+MAX_MERGE_RETRIES = 5
+RETRY_DELAY_SECONDS = 2
 
 
 def _write(
@@ -27,7 +32,7 @@ def _write(
     for col in df.columns:
         if df[col].isna().all():
             df[col] = df[col].astype(str)
-    
+
     write_deltalake(
         s3_path,
         df,
@@ -77,7 +82,39 @@ def _merge_to_delta(
     storage_options: dict,
     partition_by: list[str] | None,
 ) -> dict:
-    """MERGE/upsert records using content_hash for change detection."""
+    """MERGE/upsert records using content_hash for change detection.
+
+    Includes retry logic for concurrent write conflicts.
+    """
+    for attempt in range(1, MAX_MERGE_RETRIES + 1):
+        try:
+            return _execute_merge(df, s3_path, merge_keys, storage_options, partition_by)
+        except Exception as e:
+            error_msg = str(e).lower()
+            is_conflict = "concurrent" in error_msg or "conflict" in error_msg
+
+            if is_conflict and attempt < MAX_MERGE_RETRIES:
+                delay = RETRY_DELAY_SECONDS * attempt
+                log.warning(
+                    f"Concurrent write conflict (attempt {attempt}/{MAX_MERGE_RETRIES}), "
+                    f"retrying in {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                raise
+
+    # Should not reach here, but just in case
+    raise RuntimeError("Max retries exceeded for merge operation")
+
+
+def _execute_merge(
+    df: pd.DataFrame,
+    s3_path: str,
+    merge_keys: list[str],
+    storage_options: dict,
+    partition_by: list[str] | None,
+) -> dict:
+    """Execute a single merge attempt."""
     try:
         dt = DeltaTable(s3_path, storage_options=storage_options)
     except TableNotFoundError:

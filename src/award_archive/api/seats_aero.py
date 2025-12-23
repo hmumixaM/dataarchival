@@ -6,7 +6,12 @@ from datetime import date
 
 import httpx
 
-from award_archive.models import AvailabilityResponse, Route, SearchResponse, TripDetails
+from award_archive.models.seats_aero import (
+    AvailabilityResponse,
+    Route,
+    SearchResponse,
+    TripDetails,
+)
 
 log = logging.getLogger(__name__)
 
@@ -121,3 +126,4 @@ class SeatsAeroClient:
         })
         log.info(f"Searching: {origin_airport} -> {destination_airport}")
         return SearchResponse(**self._request("GET", "search", params))
+

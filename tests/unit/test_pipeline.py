@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from award_archive.pipeline.ingest import flatten_availability_data
+from award_archive.pipeline.seats_aero import flatten_availability_data
 
 
 class TestFlattenAvailabilityData:

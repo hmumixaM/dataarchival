@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from award_archive.api.client import RATE_LIMIT_SECONDS, SeatsAeroClient
+from award_archive.api.seats_aero import RATE_LIMIT_SECONDS, SeatsAeroClient
 
 
 @pytest.fixture
@@ -14,8 +14,8 @@ def client():
 
 @pytest.fixture
 def mock_request():
-    with patch("award_archive.api.client.httpx.request") as mock_req:
-        with patch("award_archive.api.client.time.sleep"):
+    with patch("award_archive.api.seats_aero.httpx.request") as mock_req:
+        with patch("award_archive.api.seats_aero.time.sleep"):
             mock_resp = MagicMock()
             mock_req.return_value = mock_resp
             yield mock_req, mock_resp
@@ -26,8 +26,8 @@ class TestRequest:
 
     def test_rate_limiting(self, client):
         """Rate limits before request."""
-        with patch("award_archive.api.client.httpx.request") as mock_req:
-            with patch("award_archive.api.client.time.sleep") as mock_sleep:
+        with patch("award_archive.api.seats_aero.httpx.request") as mock_req:
+            with patch("award_archive.api.seats_aero.time.sleep") as mock_sleep:
                 mock_req.return_value.json.return_value = {}
                 client._request("GET", "test")
                 mock_sleep.assert_called_once_with(RATE_LIMIT_SECONDS)

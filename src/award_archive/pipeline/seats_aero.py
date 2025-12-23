@@ -1,4 +1,4 @@
-"""Data ingestion pipeline for award availability."""
+"""Data ingestion pipeline for Seats.aero award availability."""
 
 import logging
 from datetime import date
@@ -11,6 +11,9 @@ from award_archive.api import SeatsAeroClient
 from award_archive.storage import save_to_delta
 
 log = logging.getLogger(__name__)
+
+DEFAULT_BUCKET = "s3://award-archive"
+AVAILABILITY_TABLE = f"{DEFAULT_BUCKET}/availability"
 
 
 @backoff.on_exception(
@@ -25,9 +28,6 @@ log = logging.getLogger(__name__)
 def _fetch_availability(client: SeatsAeroClient, **kwargs):
     """Fetch availability with retry backoff."""
     return client.get_bulk_availability(**kwargs)
-
-DEFAULT_BUCKET = "s3://award-archive"
-AVAILABILITY_TABLE = f"{DEFAULT_BUCKET}/availability"
 
 
 def flatten_availability_data(data: list[dict]) -> pd.DataFrame:
@@ -216,7 +216,7 @@ def ingest_availability(
         log.warning("No data fetched")
         return {"status": "no_data", "records_fetched": 0}
 
-    stats = {
+    return {
         "input_rows": total_input_rows,
         "rows_written": rows_written,
         "rows_inserted": rows_inserted,
@@ -228,5 +228,3 @@ def ingest_availability(
         "api_records": total_records,
     }
 
-    log.info(f"Ingestion complete: {stats}")
-    return stats
