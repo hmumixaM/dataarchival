@@ -3,12 +3,28 @@
 import logging
 from datetime import date
 
+import backoff
+import httpx
 import pandas as pd
 
 from award_archive.api import SeatsAeroClient
 from award_archive.storage import save_to_delta
 
 log = logging.getLogger(__name__)
+
+
+@backoff.on_exception(
+    backoff.constant,
+    (httpx.HTTPError, httpx.HTTPStatusError, httpx.TimeoutException),
+    max_tries=3,
+    interval=30,
+    on_backoff=lambda details: log.warning(
+        f"Request failed, retrying in 30s (attempt {details['tries']}/3)..."
+    ),
+)
+def _fetch_availability(client: SeatsAeroClient, **kwargs):
+    """Fetch availability with retry backoff."""
+    return client.get_bulk_availability(**kwargs)
 
 DEFAULT_BUCKET = "s3://award-archive"
 AVAILABILITY_TABLE = f"{DEFAULT_BUCKET}/availability"
@@ -140,53 +156,77 @@ def ingest_availability(
     end_date: date | None = None,
     cabin: str | None = None,
     max_pages: int | None = None,
+    page_size: int = 5000,
+    start_skip: int = 0,
 ) -> dict:
     """Ingest availability data from API to Delta Lake with deduplication."""
     client = SeatsAeroClient(api_key=api_key)
-    all_data = []
-    cursor = None
 
-    log.info(f"Starting ingestion: source={source}")
+    log.info(f"Starting ingestion: source={source}, start_skip={start_skip}")
 
     page = 0
+    total_records = 0
+    total_input_rows = 0
+    rows_written = 0
+    rows_inserted = 0
+    table_created = False
+    last_timestamp = None
+
     while max_pages is None or page < max_pages:
         page += 1
-        log.info(f"Fetching page {page}")
+        skip = start_skip + (page - 1) * page_size
+        log.info(f"Fetching page {page} (skip={skip})")
 
-        response = client.get_bulk_availability(
+        response = _fetch_availability(
+            client,
             source=source,
             cabin=cabin,
             start_date=start_date,
             end_date=end_date,
-            cursor=cursor,
-            take=1000,
+            skip=skip,
+            take=page_size,
         )
 
         page_data = [item.model_dump() for item in response.data]
-        all_data.extend(page_data)
+        total_records += len(page_data)
 
-        log.info(f"Fetched {len(page_data)} records (total: {len(all_data)})")
+        if not page_data:
+            log.info(f"No records on page {page}")
+            break
+
+        df_page = flatten_availability_data(page_data)
+        page_stats = save_to_delta(
+            df=df_page,
+            s3_path=s3_path,
+            mode="merge",
+            merge_keys=["RouteID", "UpdatedAt"],
+            partition_by=["Source", "Date"],
+        )
+
+        total_input_rows += page_stats.get("input_rows", len(df_page))
+        rows_written += page_stats.get("rows_written", len(df_page))
+        rows_inserted += page_stats.get("rows_inserted", 0)
+        table_created = table_created or page_stats.get("table_created", False)
+        last_timestamp = page_stats.get("timestamp", last_timestamp)
 
         if not response.hasMore:
             break
 
-        cursor = response.cursor
-
-    if not all_data:
+    if total_records == 0:
         log.warning("No data fetched")
         return {"status": "no_data", "records_fetched": 0}
 
-    df = flatten_availability_data(all_data)
+    stats = {
+        "input_rows": total_input_rows,
+        "rows_written": rows_written,
+        "rows_inserted": rows_inserted,
+        "table_created": table_created,
+        "mode": "merge",
+        "timestamp": last_timestamp,
+        "source": source,
+        "pages_fetched": page,
+        "api_records": total_records,
+    }
 
-    stats = save_to_delta(
-        df=df,
-        s3_path=s3_path,
-        mode="merge",
-        merge_keys=["ID"],
-        partition_by=["Source"],
-    )
-
-    stats.update({"source": source, "pages_fetched": page, "api_records": len(all_data)})
     log.info(f"Ingestion complete: {stats}")
-
     return stats

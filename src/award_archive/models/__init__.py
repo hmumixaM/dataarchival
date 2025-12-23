@@ -8,6 +8,7 @@ from award_archive.models.availability import (
     SearchResult,
     TripDetails,
 )
+from award_archive.models.source import ALL_SOURCES, Source
 
 __all__ = [
     "Route",
@@ -16,5 +17,7 @@ __all__ = [
     "SearchResult",
     "SearchResponse",
     "TripDetails",
+    "Source",
+    "ALL_SOURCES",
 ]
 

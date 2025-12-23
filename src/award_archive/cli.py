@@ -58,6 +58,12 @@ def main():
         help="Maximum API pages to fetch (default: all pages)",
     )
     parser.add_argument(
+        "--skip",
+        type=int,
+        default=0,
+        help="Starting skip offset to resume ingestion from (default: 0)",
+    )
+    parser.add_argument(
         "--optimize",
         action="store_true",
         help="Run table optimization after ingestion",
@@ -99,6 +105,7 @@ def main():
             end_date=args.end_date,
             cabin=args.cabin,
             max_pages=args.max_pages,
+            start_skip=args.skip,
         )
         all_stats.append(stats)
         print(f"Ingestion completed for {source}:")
