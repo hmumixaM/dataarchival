@@ -1,6 +1,8 @@
 """Pydantic models for iPrefer hotel availability."""
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class RateCalendarResult(BaseModel):
@@ -17,6 +19,14 @@ class RateCalendarResponse(BaseModel):
     count: int
     results: dict[str, RateCalendarResult] = Field(default_factory=dict)
     currency_code: str | None = None
+
+    @field_validator("results", mode="before")
+    @classmethod
+    def coerce_results(cls, v: Any) -> dict:
+        """Handle API returning empty list instead of empty dict."""
+        if isinstance(v, list) and len(v) == 0:
+            return {}
+        return v
 
 
 class HotelItem(BaseModel):
