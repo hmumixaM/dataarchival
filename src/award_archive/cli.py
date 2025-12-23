@@ -6,6 +6,7 @@ import os
 import sys
 from datetime import datetime
 
+from award_archive.models import ALL_SOURCES
 from award_archive.pipeline import ingest_availability
 from award_archive.pipeline.ingest import AVAILABILITY_TABLE
 from award_archive.storage import get_table_info, optimize_table
@@ -17,27 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# All available mileage program sources from seats.aero
-ALL_SOURCES = [
-    "aeromexico",
-    "aeroplan",
-    "alaska",
-    "american",
-    "avianca",
-    "delta",
-    "emirates",
-    "etihad",
-    "eurobonus",
-    "flyingblue",
-    "jetblue",
-    "lifemiles",
-    "quantas",
-    "singapore",
-    "united",
-    "velocity",
-    "virginatlantic",
-]
-
 
 def main():
     """Main entry point for the CLI."""
@@ -46,8 +26,10 @@ def main():
         "--source",
         nargs="*",
         default=None,
+        choices=ALL_SOURCES,
+        metavar="SOURCE",
         help="Mileage program source(s) to ingest. Can specify multiple (e.g., --source aeroplan united). "
-        "If omitted, ingests all sources.",
+        f"If omitted, ingests all sources. Valid sources: {', '.join(ALL_SOURCES)}",
     )
     parser.add_argument(
         "--s3-path",
@@ -94,58 +76,46 @@ def main():
         logger.error("SEATS_AERO_API_KEY environment variable not set")
         return 1
 
-    try:
-        if args.info:
-            info = get_table_info(args.s3_path)
-            print(f"Table Info for {args.s3_path}:")
-            for key, value in info.items():
-                print(f"  {key}: {value}")
-            return 0
-
-        # Determine sources to ingest (empty list or None means all sources)
-        sources = args.source if args.source else ALL_SOURCES
-        
-        # Run ingestion for each source
-        all_stats = []
-        failed_sources = []
-        
-        for source in sources:
-            logger.info(f"Ingesting source: {source}")
-            try:
-                stats = ingest_availability(
-                    api_key=api_key,
-                    source=source,
-                    s3_path=args.s3_path,
-                    start_date=args.start_date,
-                    end_date=args.end_date,
-                    cabin=args.cabin,
-                    max_pages=args.max_pages,
-                )
-                all_stats.append(stats)
-                print(f"Ingestion completed for {source}:")
-                for key, value in stats.items():
-                    print(f"  {key}: {value}")
-            except Exception as e:
-                logger.error(f"Failed to ingest {source}: {e}")
-                failed_sources.append(source)
-        
-        print(f"\nIngestion summary: {len(all_stats)}/{len(sources)} sources completed successfully")
-        if failed_sources:
-            print(f"Failed sources: {', '.join(failed_sources)}")
-
-        # Optionally optimize
-        if args.optimize:
-            logger.info("Running table optimization...")
-            opt_stats = optimize_table(args.s3_path)
-            print("Optimization completed:")
-            for key, value in opt_stats.items():
-                print(f"  {key}: {value}")
-
+    if args.info:
+        info = get_table_info(args.s3_path)
+        print(f"Table Info for {args.s3_path}:")
+        for key, value in info.items():
+            print(f"  {key}: {value}")
         return 0
 
-    except Exception as e:
-        logger.error(f"Ingestion failed: {e}")
-        return 1
+    # Determine sources to ingest (empty list or None means all sources)
+    sources = args.source if args.source else ALL_SOURCES
+    
+    # Run ingestion for each source
+    all_stats = []
+    
+    for source in sources:
+        logger.info(f"Ingesting source: {source}")
+        stats = ingest_availability(
+            api_key=api_key,
+            source=source,
+            s3_path=args.s3_path,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            cabin=args.cabin,
+            max_pages=args.max_pages,
+        )
+        all_stats.append(stats)
+        print(f"Ingestion completed for {source}:")
+        for key, value in stats.items():
+            print(f"  {key}: {value}")
+    
+    print(f"\nIngestion summary: {len(all_stats)}/{len(sources)} sources completed successfully")
+
+    # Optionally optimize
+    if args.optimize:
+        logger.info("Running table optimization...")
+        opt_stats = optimize_table(args.s3_path)
+        print("Optimization completed:")
+        for key, value in opt_stats.items():
+            print(f"  {key}: {value}")
+
+    return 0
 
 
 if __name__ == "__main__":

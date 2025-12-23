@@ -9,42 +9,38 @@ import streamlit as st
 
 def get_db_connection():
     """Initialize DuckDB connection with Delta Lake support."""
-    try:
-        con = duckdb.connect(database=":memory:")
+    con = duckdb.connect(database=":memory:")
 
-        # Install and load extensions
-        con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute("INSTALL delta; LOAD delta;")
+    # Install and load extensions
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute("INSTALL delta; LOAD delta;")
 
-        # Configure AWS credentials if available
-        if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
-            region = os.environ.get('AWS_REGION', 'us-east-1')
-            access_key = os.environ.get('AWS_ACCESS_KEY_ID')
-            secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
-            
-            # Set S3 configuration for httpfs
-            con.execute(f"SET s3_region='{region}';")
-            con.execute(f"SET s3_access_key_id='{access_key}';")
-            con.execute(f"SET s3_secret_access_key='{secret_key}';")
-            
-            # Create a secret for S3 access (used by delta extension)
-            con.execute("DROP SECRET IF EXISTS aws_secret;")
-            con.execute(f"""
-                CREATE SECRET aws_secret (
-                    TYPE S3,
-                    KEY_ID '{access_key}',
-                    SECRET '{secret_key}',
-                    REGION '{region}'
-                );
-            """)
-            
-            if os.environ.get("AWS_SESSION_TOKEN"):
-                con.execute(f"SET s3_session_token='{os.environ.get('AWS_SESSION_TOKEN')}';")
+    # Configure AWS credentials if available
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        region = os.environ.get('AWS_REGION', 'us-east-1')
+        access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+        secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+        
+        # Set S3 configuration for httpfs
+        con.execute(f"SET s3_region='{region}';")
+        con.execute(f"SET s3_access_key_id='{access_key}';")
+        con.execute(f"SET s3_secret_access_key='{secret_key}';")
+        
+        # Create a secret for S3 access (used by delta extension)
+        con.execute("DROP SECRET IF EXISTS aws_secret;")
+        con.execute(f"""
+            CREATE SECRET aws_secret (
+                TYPE S3,
+                KEY_ID '{access_key}',
+                SECRET '{secret_key}',
+                REGION '{region}'
+            );
+        """)
+        
+        if os.environ.get("AWS_SESSION_TOKEN"):
+            con.execute(f"SET s3_session_token='{os.environ.get('AWS_SESSION_TOKEN')}';")
 
-        return con
-    except Exception as e:
-        st.error(f"Failed to initialize DuckDB: {e}")
-        return None
+    return con
 
 
 def run():
@@ -87,47 +83,44 @@ def run():
     # Initialize DuckDB connection
     con = get_db_connection()
 
-    if con:
-        # Main Query Area
-        st.subheader("SQL Query")
+    # Main Query Area
+    st.subheader("SQL Query")
 
-        default_query = "SELECT * FROM delta_scan('s3://award-archive/availability') LIMIT 10;"
+    default_query = "SELECT * FROM delta_scan('s3://award-archive/availability') LIMIT 10;"
 
-        # Query Editor
-        query = st.text_area(
-            "Enter your DuckDB SQL query:",
-            value=default_query,
-            height=150,
-            help="Write standard SQL. Use delta_scan('s3://path') to reference Delta tables.",
-        )
+    # Query Editor
+    query = st.text_area(
+        "Enter your DuckDB SQL query:",
+        value=default_query,
+        height=150,
+        help="Write standard SQL. Use delta_scan('s3://path') to reference Delta tables.",
+    )
 
-        run_query = st.button("Run Query", type="primary")
+    run_query = st.button("Run Query", type="primary")
 
-        if run_query:
-            if not query.strip():
-                st.warning("Please enter a query.")
-            else:
-                try:
-                    # Timer
-                    start_time = time.time()
+    if run_query:
+        if not query.strip():
+            st.warning("Please enter a query.")
+        else:
+            try:
+                # Timer
+                start_time = time.time()
 
-                    # Execute
-                    df = con.sql(query).df()
+                # Execute
+                df = con.sql(query).df()
 
-                    end_time = time.time()
-                    elapsed_time = end_time - start_time
+                end_time = time.time()
+                elapsed_time = end_time - start_time
 
-                    # Metrics
-                    st.success(f"Query executed in {elapsed_time:.4f} seconds")
-                    st.markdown(f"**Rows returned:** {len(df)}")
+                # Metrics
+                st.success(f"Query executed in {elapsed_time:.4f} seconds")
+                st.markdown(f"**Rows returned:** {len(df)}")
 
-                    # Results
-                    st.dataframe(df, use_container_width=True)
+                # Results
+                st.dataframe(df, use_container_width=True)
 
-                except Exception as e:
-                    st.error(f"SQL Error: {e}")
-    else:
-        st.error("Could not establish database connection.")
+            except Exception as e:
+                st.error(f"SQL Error: {e}")
 
 
 if __name__ == "__main__":

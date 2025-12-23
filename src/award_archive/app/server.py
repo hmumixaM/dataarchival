@@ -1,15 +1,14 @@
 """FastAPI server for award archive ingestion."""
 
-import asyncio
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from enum import Enum
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
+from award_archive.models import ALL_SOURCES, Source
 from award_archive.pipeline import ingest_availability
 
 logging.basicConfig(level=logging.INFO)
@@ -20,39 +19,6 @@ app = FastAPI(
     description="API for ingesting award availability data to Delta Lake",
     version="0.1.0",
 )
-
-
-class Source(str, Enum):
-    """Available mileage program sources from Seats.aero."""
-    
-    # All 24 mileage programs from seats.aero
-    aeromexico = "aeromexico"              # Aeromexico Club Premier
-    aeroplan = "aeroplan"                  # Air Canada Aeroplan
-    flying_blue = "flying_blue"            # Air France/KLM Flying Blue
-    alaska = "alaska"                      # Alaska Atmos Rewards
-    american = "american"                  # American Airlines AAdvantage
-    azul = "azul"                          # Azul Fidelidade
-    connectmiles = "connectmiles"          # Copa ConnectMiles
-    delta_skymiles = "delta_skymiles"      # Delta SkyMiles
-    emirates = "emirates"                  # Emirates Skywards
-    ethiopian = "ethiopian"                # Ethiopian ShebaMiles
-    etihad = "etihad"                      # Etihad Guest
-    finnair = "finnair"                    # Finnair Plus
-    smiles = "smiles"                      # GOL Smiles
-    jetblue = "jetblue"                    # JetBlue TrueBlue
-    lufthansa = "lufthansa"                # Lufthansa Miles & More
-    qantas = "qantas"                      # Qantas Frequent Flyer
-    qatar = "qatar"                        # Qatar Airways Privilege Club
-    eurobonus = "eurobonus"                # SAS EuroBonus
-    saudia = "saudia"                      # Saudia AlFursan
-    singapore = "singapore"                # Singapore Airlines KrisFlyer
-    turkish = "turkish"                    # Turkish Miles&Smiles
-    united = "united"                      # United MileagePlus
-    virgin_atlantic = "virgin_atlantic"    # Virgin Atlantic Flying Club
-    velocity = "velocity"                  # Virgin Australia Velocity
-
-
-ALL_SOURCES = [s.value for s in Source]
 
 
 class IngestRequest(BaseModel):
@@ -98,20 +64,16 @@ def _ingest_source(
     max_pages: int,
 ) -> IngestResponse:
     """Ingest a single source and return response."""
-    try:
-        api_key = _get_api_key()
-        stats = ingest_availability(
-            api_key=api_key,
-            source=source,
-            start_date=start_date,
-            end_date=end_date,
-            cabin=cabin,
-            max_pages=max_pages,
-        )
-        return IngestResponse(status="success", source=source, stats=stats)
-    except Exception as e:
-        log.error(f"Failed to ingest {source}: {e}")
-        return IngestResponse(status="error", source=source, error=str(e))
+    api_key = _get_api_key()
+    stats = ingest_availability(
+        api_key=api_key,
+        source=source,
+        start_date=start_date,
+        end_date=end_date,
+        cabin=cabin,
+        max_pages=max_pages,
+    )
+    return IngestResponse(status="success", source=source, stats=stats)
 
 
 @app.get("/")
@@ -136,12 +98,13 @@ async def ingest_source(
     
     log.info(f"Starting ingestion for source: {source.value}")
     
-    return _ingest_source(
-        source=source.value,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        cabin=request.cabin,
-        max_pages=request.max_pages,
+    return await run_in_threadpool(
+        _ingest_source,
+        source.value,
+        request.start_date,
+        request.end_date,
+        request.cabin,
+        request.max_pages,
     )
 
 
@@ -163,13 +126,22 @@ async def ingest_all_sources(
     results = []
     for source in source_list:
         log.info(f"Ingesting source: {source}")
-        result = _ingest_source(
-            source=source,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            cabin=request.cabin,
-            max_pages=request.max_pages,
-        )
+        try:
+            result = await run_in_threadpool(
+                _ingest_source,
+                source,
+                request.start_date,
+                request.end_date,
+                request.cabin,
+                request.max_pages,
+            )
+        except HTTPException as exc:
+            log.exception("Failed to ingest %s", source)
+            result = IngestResponse(status="error", source=source, error=str(exc.detail))
+        except Exception as exc:
+            log.exception("Failed to ingest %s", source)
+            result = IngestResponse(status="error", source=source, error=str(exc))
+
         results.append(result)
     
     # Calculate summary
@@ -205,16 +177,30 @@ async def ingest_all_background(background_tasks: BackgroundTasks):
     """
     
     def run_bulk_ingest():
+        successes: list[str] = []
+        failures: list[str] = []
         for source in ALL_SOURCES:
             log.info(f"[Background] Ingesting all data from: {source}")
-            _ingest_source(
-                source=source,
-                start_date=None,  # No date filter - get everything
-                end_date=None,
-                cabin=None,       # All cabins
-                max_pages=100,    # High limit to get all pages
-            )
-        log.info("[Background] Bulk ingestion complete for all sources")
+            try:
+                _ingest_source(
+                    source=source,
+                    start_date=None,  # No date filter - get everything
+                    end_date=None,
+                    cabin=None,       # All cabins
+                    max_pages=100,    # High limit to get all pages
+                )
+                successes.append(source)
+            except Exception:
+                failures.append(source)
+                log.exception("[Background] Failed to ingest %s", source)
+        log.info(
+            "[Background] Bulk ingestion complete",
+            extra={
+                "successful_sources": len(successes),
+                "failed_sources": len(failures),
+                "failed_source_names": failures,
+            },
+        )
     
     background_tasks.add_task(run_bulk_ingest)
     

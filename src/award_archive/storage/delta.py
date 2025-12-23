@@ -7,6 +7,7 @@ from typing import Literal
 import pandas as pd
 import pyarrow as pa
 from deltalake import DeltaTable, write_deltalake
+from deltalake.exceptions import TableNotFoundError
 
 from award_archive.storage.credentials import get_storage_options
 from award_archive.storage.hashing import add_metadata_columns
@@ -79,7 +80,7 @@ def _merge_to_delta(
     """MERGE/upsert records using content_hash for change detection."""
     try:
         dt = DeltaTable(s3_path, storage_options=storage_options)
-    except Exception:
+    except TableNotFoundError:
         log.info(f"Table doesn't exist, creating: {s3_path}")
         _write(df, s3_path, "overwrite", storage_options, partition_by)
         return {"rows_inserted": len(df), "table_created": True}

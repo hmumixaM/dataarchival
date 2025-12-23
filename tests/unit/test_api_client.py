@@ -14,7 +14,7 @@ def client():
 
 @pytest.fixture
 def mock_request():
-    with patch("award_archive.api.client.requests.request") as mock_req:
+    with patch("award_archive.api.client.httpx.request") as mock_req:
         with patch("award_archive.api.client.time.sleep"):
             mock_resp = MagicMock()
             mock_req.return_value = mock_resp
@@ -26,7 +26,7 @@ class TestRequest:
 
     def test_rate_limiting(self, client):
         """Rate limits before request."""
-        with patch("award_archive.api.client.requests.request") as mock_req:
+        with patch("award_archive.api.client.httpx.request") as mock_req:
             with patch("award_archive.api.client.time.sleep") as mock_sleep:
                 mock_req.return_value.json.return_value = {}
                 client._request("GET", "test")

@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import date
 
-import requests
+import httpx
 
 from award_archive.models import AvailabilityResponse, Route, SearchResponse, TripDetails
 
@@ -37,7 +37,7 @@ class SeatsAeroClient:
         url = f"{BASE_URL}/{endpoint}"
 
         log.debug(f"{method} {url}")
-        response = requests.request(method, url, headers=self.headers, params=params)
+        response = httpx.request(method, url, headers=self.headers, params=params, timeout=30.0)
         response.raise_for_status()
 
         return response.json()

@@ -146,6 +146,16 @@ stats = ingest_availability(
 
 ## Development
 
+### Standards
+
+This project follows specific development standards:
+
+1.  **Dependency Management**: All dependencies are managed via **uv**.
+2.  **HTTP Client**: Uses **httpx** for robust, timeout-aware requests.
+3.  **Fail Fast**: No broad `try-except` blocks; let exceptions propagate to identify issues immediately.
+
+### Commands
+
 ```bash
 # Install with dev dependencies
 uv sync --all-extras
