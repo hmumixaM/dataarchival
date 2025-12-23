@@ -44,9 +44,9 @@ class HotelDetails(BaseModel):
     country: str | None = None
     title: str | None = None
     description: str | None = None
-    choice_points: str | None = None
+    choice_points: str | int | None = None
     average_rate: str | None = None
-    synxis_id: str | None = None
+    synxis_id: str | int | None = None
     book_with_points: bool | None = None
     book_with_choice: bool | None = None
 
