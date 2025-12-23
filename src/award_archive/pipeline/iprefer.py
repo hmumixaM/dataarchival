@@ -5,10 +5,12 @@ from itertools import batched
 
 import httpx
 import pandas as pd
+from deltalake import DeltaTable
 
 from award_archive.api import fetch_calendar, fetch_hotel_details, fetch_hotel_links
 from award_archive.models import HotelAvailability, HotelDetails
 from award_archive.storage import save_to_delta
+from award_archive.storage.credentials import get_storage_options
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +54,14 @@ def _fetch_availability_for_nid(
     if include_cash:
         availability.extend(fetch_calendar(client, nid, is_points=False))
     return availability
+
+
+def _get_nids_from_hotels_table(hotels_path: str = HOTELS_TABLE) -> list[int]:
+    """Read hotel NIDs from the Delta Lake hotels table."""
+    storage_options = get_storage_options()
+    dt = DeltaTable(hotels_path, storage_options=storage_options)
+    df = dt.to_pandas(columns=["nid"])
+    return df["nid"].tolist()
 
 
 def ingest_iprefer_hotels(
@@ -103,6 +113,7 @@ def ingest_iprefer_hotels(
 
 def ingest_iprefer_availability(
     s3_path: str = AVAILABILITY_TABLE,
+    hotels_path: str = HOTELS_TABLE,
     nids: list[int] | None = None,
     include_points: bool = True,
     include_cash: bool = True,
@@ -112,7 +123,8 @@ def ingest_iprefer_availability(
 
     Args:
         s3_path: S3 path for availability Delta table
-        nids: Specific hotel NIDs to fetch (if None, fetches from directory)
+        hotels_path: S3 path for hotels Delta table (used to get NIDs)
+        nids: Specific hotel NIDs to fetch (if None, reads from hotels table)
         include_points: Include points availability
         include_cash: Include cash availability
         max_hotels: Maximum number of hotels to process (for testing)
@@ -123,13 +135,11 @@ def ingest_iprefer_availability(
     log.info(f"Starting iPrefer availability ingestion to {s3_path}")
 
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
-        # Resolve NIDs if not provided
+        # Resolve NIDs if not provided - read from Delta table
         if nids is None:
-            log.info("No NIDs provided, fetching from hotel directory")
-            links = fetch_hotel_links(client)
-            if max_hotels:
-                links = links[:max_hotels]
-            nids = [fetch_hotel_details(client, link.url).nid for link in links]
+            log.info(f"Reading NIDs from hotels table: {hotels_path}")
+            nids = _get_nids_from_hotels_table(hotels_path)
+            log.info(f"Found {len(nids)} hotels in table")
 
         if max_hotels and len(nids) > max_hotels:
             nids = nids[:max_hotels]
@@ -154,7 +164,7 @@ def ingest_iprefer_availability(
                 s3_path=s3_path,
                 mode="merge",
                 merge_keys=["nid", "date", "is_points"],
-                partition_by=["nid", "date"],
+                partition_by=["is_points", "nid", "date"],
             )
             total_availability += len(batch_availability)
             rows_written += stats.get("rows_written", len(df))
@@ -196,16 +206,11 @@ def ingest_iprefer(
     hotel_stats = ingest_iprefer_hotels(s3_path=hotels_path, max_hotels=max_hotels)
     log.info(f"Hotel ingestion complete: {hotel_stats}")
 
-    # Step 2: Collect NIDs and ingest availability
-    with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
-        links = fetch_hotel_links(client)
-        if max_hotels:
-            links = links[:max_hotels]
-        nids = [fetch_hotel_details(client, link.url).nid for link in links]
-
+    # Step 2: Read NIDs from freshly updated hotels table and ingest availability
     avail_stats = ingest_iprefer_availability(
         s3_path=availability_path,
-        nids=nids,
+        hotels_path=hotels_path,
+        max_hotels=max_hotels,
         include_points=include_points,
         include_cash=include_cash,
     )
