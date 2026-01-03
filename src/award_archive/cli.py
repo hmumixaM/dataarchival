@@ -39,13 +39,31 @@ def cli():
     pass
 
 
+def validate_sources(sources: tuple) -> list:
+    """Validate source names against ALL_SOURCES."""
+    validated = []
+    for src in sources:
+        src_lower = src.lower()
+        if src_lower not in [s.lower() for s in ALL_SOURCES]:
+            raise click.ClickException(
+                f"Invalid source '{src}'. Valid sources: {', '.join(ALL_SOURCES)}"
+            )
+        # Find the canonical name
+        for canonical in ALL_SOURCES:
+            if canonical.lower() == src_lower:
+                validated.append(canonical)
+                break
+    return validated
+
+
 @cli.command()
+@click.argument("sources", nargs=-1)
 @click.option(
     "--source",
     "-s",
     multiple=True,
-    type=click.Choice(ALL_SOURCES, case_sensitive=False),
-    help="Mileage program source(s). Can specify multiple times. Omit for all sources.",
+    help=f"Mileage program source(s). Can specify multiple times. "
+    f"Valid: {', '.join(ALL_SOURCES)}. Omit for all sources.",
 )
 @click.option(
     "--s3-path",
@@ -85,13 +103,22 @@ def cli():
     is_flag=True,
     help="Run table optimization after ingestion.",
 )
-def seats(source, s3_path, start_date, end_date, cabin, max_pages, skip, optimize):
-    """Ingest flight availability from seats.aero API."""
+def seats(sources, source, s3_path, start_date, end_date, cabin, max_pages, skip, optimize):
+    """Ingest flight availability from seats.aero API.
+
+    SOURCES can be provided as positional arguments (e.g., 'seats eurobonus saudia')
+    or via --source/-s options. Omit to process all sources.
+    """
     api_key = os.environ.get("SEATS_AERO_API_KEY")
     if not api_key:
         raise click.ClickException("SEATS_AERO_API_KEY environment variable not set")
 
-    sources = list(source) if source else ALL_SOURCES
+    # Combine positional args and --source options
+    all_sources_input = sources + source
+    if all_sources_input:
+        sources = validate_sources(all_sources_input)
+    else:
+        sources = list(ALL_SOURCES)
     all_stats = []
 
     for src in sources:
